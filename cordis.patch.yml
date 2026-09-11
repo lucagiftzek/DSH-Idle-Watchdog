@@ -1,0 +1,21 @@
+# dsh-idle-watchdog bundle patch.
+#
+# Inserts one HOST row so the composition mounts the package; the node half
+# (exports ".") carries the whole engine (session-event tracking, idle nudges,
+# settings namespace, HTTP API). The browser half (lib/client.js, declared via
+# package.json `dsh.client`) adds the "Idle Watchdog" section to the Settings
+# page through the `settings.section` slot client service.
+#
+# Install (this estate):  dependency `link:/opt/stacks/llm/plugins/DSH-Idle-Watchdog`
+# added to ~/.dsh/profiles/web/package.json `dependencies` and the bundle id
+# appended to `dsh.profile.bundles`, then `pnpm install` in that profile dir.
+#
+# KILL SWITCH (no uninstall needed): add to
+# ~/.dsh/profiles/web/cordis.patch.yml
+#     - id: idle-watchdog
+#       disabled: true
+# and restart dsh-web. Runtime master switch without restart: the Settings →
+# Idle Watchdog toggle (`enabled`), which applies live.
+- insert:
+    - id: idle-watchdog
+      name: 'dsh-idle-watchdog'
