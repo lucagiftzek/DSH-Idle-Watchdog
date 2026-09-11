@@ -168,20 +168,39 @@ fakeAgents.set('session-watchme', {
 })
 
 const registered = { routes: [], effects: [], events: [] }
-const ctx = {
+// sessionQuery fake with the REAL production shapes (SessionRecord headers;
+// readTitleSnapshots → {sessionId, status, value:{session, title?}}) so the
+// catalog path is driven exactly as the host will drive it.
+const fakeSessionQuery = {
+  listSessions: async () => [
+    { header: { id: 'session-watchme', cwd: '/srv/demo', createdAt: 1720000000000 }, live: true, persisted: true },
+    { header: { id: 'session-cold-legacy', cwd: '/srv/demo', createdAt: 1710000000000 }, live: false, persisted: true },
+  ],
+  readTitleSnapshots: async (ids) => ids.map((id) => (id === 'session-watchme'
+    ? { sessionId: id, status: 'fulfilled', value: { session: { id }, title: { title: 'Alpha demo', messageSeqs: [1], source: { kind: 'provider', provider: 'fake' }, eventSeq: 3, updatedAt: 1 } } }
+    : { sessionId: id, status: 'fulfilled', value: { session: { id } } })),
+}
+// The real cordis Fiber THROWS on any ctx.<service> property read outside
+// `inject` — mimic that exactly. A permissive plain-object ctx once let the
+// ctx.sessions catalog bug ship to production.
+const strictCtx = (base) => new Proxy(base, {
+  get(t, k) {
+    if (typeof k === 'symbol' || k in t) return t[k]
+    throw new TypeError(`cannot get property "${String(k)}" without inject`)
+  },
+})
+const ctx = strictCtx({
   agents: {
     get: (id) => fakeAgents.get(id),
     list: () => [...fakeAgents.values()],
   },
   settings: { register: () => { throw new Error('schema path unavailable in fake ctx') } }, // force fallback store
   webServer: { register: (route) => { registered.routes.push(route); return () => {} } },
-  sessions: { get: () => undefined, list: () => [] },
   on: (name, fn) => { registered.events.push([name, fn]); return () => {} },
   // cordis ctx.effect(fn) runs fn NOW and keeps its return as the disposer.
   effect: (fn, label) => { registered.effects.push([fn, label]); return fn() },
-  get: (k) => undefined,
-  logger: { info: () => {}, warn: () => {}, debug: () => {} },
-}
+  get: (k) => (k === 'sessionQuery' ? fakeSessionQuery : k === 'sessionTitle' ? { get: () => undefined } : undefined),
+})
 
 mod.apply(ctx, {})
 assert.equal(registered.routes.length, 1, 'one prefix route registered')
@@ -220,6 +239,18 @@ const call = async (req, res) => { await handler(req, res); return res }
   assert.equal(body.settings.idleMinutes, 1)
   console.log('  ok - PUT /settings with guard -> saved to fallback store')
 }
+// the picker data: catalog built from sessionQuery with real shapes
+{
+  const res = await call(fakeReq('GET', '/dsh-idle-watchdog/api/chats?refresh=1'), fakeRes())
+  assert.equal(res.statusCode, 200)
+  const { rows } = JSON.parse(res.body)
+  const watched = rows.find((r) => r.sessionId === 'session-watchme')
+  assert.ok(watched, 'known chat listed')
+  assert.equal(watched.title, 'Alpha demo', 'title mapped from real SessionTitleObservationResult shape')
+  assert.equal(watched.live, true)
+  assert.ok(rows.some((r) => r.sessionId === 'session-cold-legacy'), 'cold persisted chat listed too')
+  console.log('  ok - GET /chats builds catalog via sessionQuery (titles + cold rows)')
+}
 // prompt without any configured secret fails closed
 {
   const res = await call(fakeReq('POST', '/dsh-idle-watchdog/api/prompt', { body: { chat: 'session-watchme', message: 'hi' } }), fakeRes())
@@ -248,7 +279,11 @@ const call = async (req, res) => { await handler(req, res); return res }
   assert.equal(followups[0].content[0].text, 'external ping')
   assert.equal(followups[0].source.kind, 'plugin')
   assert.ok(followups[0].id.length > 10)
-  console.log('  ok - secret set -> bad 401, good prompt accepted via title ref')
+  // the REAL session title (from readTitleSnapshots, not the settings label) resolves too
+  const byTitle = await call(fakeReq('POST', '/dsh-idle-watchdog/api/prompt', { headers: { 'x-idle-watchdog-secret': 'a-proper-long-secret-1' }, body: { chat: 'alpha demo', message: 'by title' } }), fakeRes())
+  assert.equal(byTitle.statusCode, 202)
+  assert.equal(JSON.parse(byTitle.body).via, 'title')
+  console.log('  ok - secret set -> bad 401, good prompt accepted via title ref (label + real title)')
 }
 // rate limiting: default 30/min — flood past it
 {
@@ -316,7 +351,7 @@ const nudgeAgent = {
   followup: (m) => followups2.push(m),
 }
 const registered2 = { routes: [], events: [] }
-const ctx2 = {
+const ctx2 = strictCtx({
   agents: { get: (id) => (id === 'session-nudge' ? nudgeAgent : undefined), list: () => [nudgeAgent] },
   settings: {
     register: (ns, schema, opts) => {
@@ -326,12 +361,10 @@ const ctx2 = {
     },
   },
   webServer: { register: (route) => { registered2.routes.push(route); return () => {} } },
-  sessions: { get: () => undefined, list: () => [] },
   on: (name, fn) => { registered2.events.push([name, fn]); return () => {} },
   effect: (fn) => fn(),
   get: () => undefined,
-  logger: { info: () => {}, warn: () => {}, debug: () => {} },
-}
+})
 mod.apply(ctx2, {})
 assert.equal(registered2.routes.length, 1)
 const handler2 = registered2.routes[0].handler
