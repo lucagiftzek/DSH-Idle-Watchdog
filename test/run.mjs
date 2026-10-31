@@ -164,6 +164,15 @@ test('backoff: window grows per nudge and respects the cap', () => {
   assert.ok(decideNudge({ ...base, st: { ...newState(now - 41 * 60_000), nudgesSent: 1 } }))
 })
 
+test('backoff window stays finite with a corrupt nudge count', () => {
+  const entry = { id: 'x', enabled: true, prompt: '', idleMinutes: 0 }
+  const eff = { ...DEFAULTS, backoffFactor: 10 }
+  for (const n of [1e6, Infinity, NaN, -5]) {
+    const w = nudgeWindowMs(entry, { nudgesSent: n }, eff)
+    assert.ok(Number.isFinite(w) && w >= 20 * 60_000 && w <= 366 * 24 * 60 * 60_000, 'finite window for ' + n)
+  }
+})
+
 test('goal-active skip only when enabled', () => {
   const now = 1_000_000_000
   const entry = { id: 'x', enabled: true, prompt: '', idleMinutes: 0 }
@@ -322,6 +331,22 @@ const call = async (req, res) => { await handler(req, res); return res }
   assert.equal(body.settings.chats.length, 1)
   assert.equal(body.settings.idleMinutes, 1)
   console.log('  ok - PUT /settings with guard -> saved to fallback store')
+}
+// quietHours PUT is a partial merge; typos keep the stored value
+{
+  const put = (quietHours) => call(fakeReq('PUT', '/dsh-idle-watchdog/api/settings', {
+    headers: { 'x-requested-with': 'dsh-idle-watchdog', 'content-type': 'application/json' },
+    body: { quietHours },
+  }), fakeRes())
+  let res = await put({ enabled: true, start: '23:30', end: '06:15', timezone: 'UTC' })
+  assert.equal(res.statusCode, 200)
+  res = await put({ enabled: false })
+  assert.deepEqual(JSON.parse(res.body).settings.quietHours, { enabled: false, start: '23:30', end: '06:15', timezone: 'UTC' }, 'partial PUT keeps the other fields')
+  res = await put({ start: '23.00', timezone: 'Europe/Berln' })
+  assert.equal(res.statusCode, 400, 'all-invalid quietHours is not a silent reset')
+  res = await put({ start: '21:00', timezone: 'Nope/Zone' })
+  assert.deepEqual(JSON.parse(res.body).settings.quietHours, { enabled: false, start: '21:00', end: '06:15', timezone: 'UTC' }, 'bad zone keeps the stored one')
+  console.log('  ok - PUT quietHours merges partially and never silently resets')
 }
 // the picker data: catalog built from sessionQuery with real shapes
 {

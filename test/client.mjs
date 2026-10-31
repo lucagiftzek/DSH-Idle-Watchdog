@@ -126,6 +126,36 @@ assert.ok(slots.registered[0].label().includes('Idle Watchdog'))
   assert.equal(sentBody.api.secret, undefined, 'save never sends a secret')
 
   await act(async () => { root.unmount() })
+
+  // NEW client against the OLD (v1.0) server: the browser half hot-reloads,
+  // the server half waits for a dsh-web restart. No preview, no v1.1 keys.
+  const oldStatus = JSON.parse(JSON.stringify(statusPayload))
+  delete oldStatus.preview
+  oldStatus.version = '1.0.0'
+  for (const k of ['skipWhenGoalActive', 'onlyAfterError', 'backoffFactor', 'backoffMaxMinutes', 'quietHours']) delete oldStatus.settings[k]
+  const oldCalls = []
+  fetchImpl.fn = (url, init) => {
+    oldCalls.push({ url: String(url), init })
+    const body = String(url).endsWith('/chats') ? { at: Date.now(), rows: [] } : oldStatus
+    return Promise.resolve({ ok: true, status: 200, json: () => Promise.resolve(body) })
+  }
+  document.getElementById('root').innerHTML = ''
+  const root2 = createRoot(document.getElementById('root'))
+  await act(async () => { root2.render(React.createElement(slots.component)) })
+  await act(async () => { await new Promise((r) => setTimeout(r, 50)) })
+  const html2 = document.getElementById('root').innerHTML
+  assert.ok(html2.includes('restart dsh-web'), 'v1.1 options replaced by a restart hint on a v1.0 server')
+  assert.ok(!html2.includes('Quiet hours (no idle nudges)'), 'no controls the old server would drop')
+  const statusCard = [...document.querySelectorAll('.iw-card')].find((c) => c.textContent.startsWith('Status'))
+  assert.ok(statusCard && statusCard.textContent.includes('Demo') && !statusCard.textContent.includes('No chats watched'), 'status table falls back to perChat rows')
+  const save2 = [...document.querySelectorAll('button')].find((b) => b.textContent === 'Save settings')
+  await act(async () => { save2.dispatchEvent(new dom.window.MouseEvent('click', { bubbles: true })) })
+  await act(async () => { await new Promise((r) => setTimeout(r, 30)) })
+  const put2 = oldCalls.find((c) => c.url.endsWith('/settings'))
+  const body2 = JSON.parse(put2.init.body)
+  assert.equal(body2.backoffFactor, undefined, 'no v1.1 keys sent to a v1.0 server')
+  assert.equal(body2.chats[0].id, 'session-demo-chat')
+  await act(async () => { root2.unmount() })
   console.log('client boot test: ok (loads, registers settings.section, mounts, saves with CSRF guard)')
   process.exit(0)
 })().catch((e) => { console.error(e); process.exit(1) })
