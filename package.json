@@ -51,7 +51,10 @@
     "webhook",
     "automation"
   ],
-  "author": "Loukas \"Luca\" Tzekos",
+  "author": {
+    "name": "Loukas \"Luca\" Tzekos",
+    "url": "https://jobopportunitiesapi.org"
+  },
   "license": "MIT",
   "repository": {
     "type": "git",

@@ -152,7 +152,7 @@ function fakeReq(method, path, { headers, body } = {}) {
   req.method = method
   req.url = path
   req.headers = Object.assign({}, headers)
-  req.socket = { remoteAddress: '10.9.8.7' }
+  req.socket = { remoteAddress: '192.0.2.7' }
   req.destroy = () => {}
   if (body !== undefined) setImmediate(() => { req.emit('data', Buffer.from(JSON.stringify(body))); req.emit('end') })
   else setImmediate(() => req.emit('end'))
@@ -323,7 +323,7 @@ mkdirSync(join(process.env.DSH_HOME, 'idle-watchdog'), { recursive: true })
 // so the primary settings-scope path — not just the fallback — is exercised.
 for (const guess of [
   join(dirname(process.execPath), '..', 'lib', 'node_modules', '@deepseek-ai', 'dsh', 'node_modules', '@deepseek-ai', 'schemastery', 'lib', 'index.cjs'),
-  '/home/lucagiftzek/.nvm/versions/node/v24.19.0/lib/node_modules/@deepseek-ai/dsh/node_modules/@deepseek-ai/schemastery/lib/index.cjs',
+  join(process.env.HOME || '', '.nvm', 'versions', 'node', process.version, 'lib', 'node_modules', '@deepseek-ai', 'dsh', 'node_modules', '@deepseek-ai', 'schemastery', 'lib', 'index.cjs'),
 ]) {
   if (existsSync(guess)) { process.env.DSH_SCHEMASTERY_ENTRY = guess; break }
 }

@@ -6,7 +6,7 @@
 # package.json `dsh.client`) adds the "Idle Watchdog" section to the Settings
 # page through the `settings.section` slot client service.
 #
-# Install (this estate):  dependency `link:/opt/stacks/llm/plugins/DSH-Idle-Watchdog`
+# Install dependency `link:/path/to/DSH-Idle-Watchdog`
 # added to ~/.dsh/profiles/web/package.json `dependencies` and the bundle id
 # appended to `dsh.profile.bundles`, then `pnpm install` in that profile dir.
 #

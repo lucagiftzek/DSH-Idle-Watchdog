@@ -2,10 +2,10 @@
 
 DeepSeek Harness web-profile plugin: watches chats, auto-prompts the ones that
 go idle, and exposes a small secret-protected HTTP API that lets external
-callers (cron jobs, other boxes, phones via the estate edge) inject a message
+callers (cron jobs, other boxes, phones via your reverse proxy) inject a message
 into a specific chat.
 
-Built against this estate on **BlackServer**, 2026-09-11.
+Built against a single DSH host, 2026-09-11.
 
 ## 1. The infrastructure this rides (measured, not assumed)
 
@@ -20,19 +20,19 @@ Built against this estate on **BlackServer**, 2026-09-11.
 | Settings persistence + live edits | `ctx.settings.register(ns, schemasterySchema, {applies:'live'}) → {get, update}` | `@deepseek-ai/dsh-settings` |
 | HTTP surface | `ctx.webServer.register({kind:'prefix', path, handler(req,res)})` | `@deepseek-ai/dsh-host-webserver` |
 | Settings-page UI | client slot `settings.section` + locale registry | `slots`/`locale` client services; precedent: `dsh-continue` client |
-| State dir | `$DSH_HOME/idle-watchdog/` (`DSH_HOME=/home/lucagiftzek/.dsh`) | convention from dsh-continue |
+| State dir | `$DSH_HOME/idle-watchdog/` (`DSH_HOME=~/.dsh`) | convention from dsh-continue |
 
 Deployment shape (from `~/.dsh/profiles/web/`): the web server is
 `dsh web --host 127.0.0.1 --port 3080`, composed from bundles listed in
 `package.json` `dsh.profile.bundles`; local plugins are `link:` deps under
-`/opt/stacks/llm/plugins/*` (dsh-artifacts, dsh-voice, dsh-session-pin,
+a local plugins folder (dsh-artifacts, dsh-voice, dsh-session-pin,
 dsh-model-picker-augmented). A plugin package contributes
-`dsh.bundle.patch → cordis.patch.yml` inserting one host row. The public edge
-is `llm.tzekos.eu` → Traefik (tz-auth forwardAuth) → `dsh-proxy.py` → dsh.
+`dsh.bundle.patch → cordis.patch.yml` inserting one host row. A public edge
+would be, for example, `dsh.example.com` → reverse proxy (forward-auth login gate) → dsh.
 
 **Auth reality check**: the webServer mounts plugin routes *without any host
-auth* (the CSRF lesson from this box's `dsh-genui` incident). Reaching them
-from outside means passing tz-auth at the edge; on the box itself anything can
+auth* (the CSRF lesson from past incidents with other plugins). Reaching them
+from outside means passing the login proxy at the edge; on the box itself anything can
 hit `127.0.0.1:3080`. Therefore the API's own secret is the *primary* control
 for machine callers, and mutating UI endpoints get a CSRF guard
 (`X-Requested-With` + JSON content-type).

@@ -23,7 +23,7 @@ POST /dsh-idle-watchdog/api/prompt            ← the API (secret header)
 → 202 { "ok": true, "chat": "session-4c1760…", "via": "title", "resumed": false }
 ```
 
-## Install (this estate: BlackServer / web profile)
+## Install (DSH web profile)
 
 ```bash
 # 1. package is linked, not copied — keep the repo checked out where it lives
@@ -79,11 +79,12 @@ cold chat · `400` validation · `401` wrong secret (≥10/min/IP before
 throttling to `429`) · `403` subagent-owned chat · `404` unknown chat ·
 `409` ambiguous/undeliverable · `503` no secret configured (fail-closed).
 
-On this estate the route is loopback (`127.0.0.1:3080`); through the edge it
-also passes tz-auth, so from **Main** or any box with ssh to BlackServer:
+The route is loopback (`127.0.0.1:3080`); if you expose it through a reverse
+proxy it should also sit behind your login proxy (for example a forward-auth
+gate). From another box with ssh to your DSH host:
 
 ```bash
-ssh blackserver 'curl -sS -X POST http://127.0.0.1:3080/dsh-idle-watchdog/api/prompt \
+ssh your-dsh-host 'curl -sS -X POST http://127.0.0.1:3080/dsh-idle-watchdog/api/prompt \
   -H "content-type: application/json" \
   -H "x-idle-watchdog-secret: $IW_SECRET" \
   -d "{\"chat\":\"ops triage\",\"message\":\"Recheck the queue and alert on regressions.\"}"'
@@ -138,3 +139,7 @@ npm test            # pure-helper units + fake-ctx boot + nudge-loop integration
 ```
 
 License: MIT.
+
+---
+
+Built by Luca Tzekos, who also makes [**Job Opportunities API**](https://jobopportunitiesapi.org): employer-direct job data with per-field provenance you can verify yourself, free to read and available as an API. If this plugin is useful to you, a star on this repo or a look at [jobopportunitiesapi.org](https://jobopportunitiesapi.org) is the best thanks.
