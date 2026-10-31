@@ -1,5 +1,5 @@
 /**
- * DSH-Idle-Watchdog — tests.
+ * DSH-Idle-Watchdog, tests.
  *
  * Two layers:
  *  1. Pure-helper unit tests over the decision/validation surface
@@ -27,6 +27,7 @@ const I = mod.__internals
 const {
   DEFAULTS, sanitizeSettingsPatch, safeSettings, secretEquals, secretFingerprint,
   presentedSecret, makeRateLimiter, resolveChatRef, decideNudge, isHumanUserMessage, newState,
+  evaluateChat, nudgeWindowMs, inQuietHours, normalizeQuietHours,
 } = I
 
 let passed = 0
@@ -137,6 +138,89 @@ test('decideNudge respects window, cap, running, master switch', () => {
   assert.ok(shortWindow)                                                       // 5m personal window hit
 })
 
+test('v1.1 defaults reproduce v1.0 behaviour', () => {
+  assert.equal(DEFAULTS.skipWhenGoalActive, false)
+  assert.equal(DEFAULTS.onlyAfterError, false)
+  assert.equal(DEFAULTS.backoffFactor, 1)
+  assert.equal(DEFAULTS.backoffMaxMinutes, 0)
+  assert.equal(DEFAULTS.quietHours.enabled, false)
+  assert.ok(!/[\u2013\u2014]/.test(DEFAULTS.defaultPrompt), 'no dashes in the default prompt')
+  const eff = { ...DEFAULTS }
+  const entry = { id: 'x', enabled: true, prompt: '', idleMinutes: 0 }
+  for (const n of [0, 1, 2]) assert.equal(nudgeWindowMs(entry, { nudgesSent: n }, eff), 20 * 60_000)
+})
+
+test('backoff: window grows per nudge and respects the cap', () => {
+  const entry = { id: 'x', enabled: true, prompt: '', idleMinutes: 0 }
+  const eff = { ...DEFAULTS, backoffFactor: 2 }
+  assert.equal(nudgeWindowMs(entry, { nudgesSent: 0 }, eff), 20 * 60_000)
+  assert.equal(nudgeWindowMs(entry, { nudgesSent: 1 }, eff), 40 * 60_000)
+  assert.equal(nudgeWindowMs(entry, { nudgesSent: 2 }, eff), 80 * 60_000)
+  assert.equal(nudgeWindowMs(entry, { nudgesSent: 2 }, { ...eff, backoffMaxMinutes: 60 }), 60 * 60_000)
+  const now = 1_000_000_000
+  const base = { now, entry, eff, agentLive: true, agentStatus: 'idle' }
+  // 1 nudge sent, silent 30m: constant window would fire, doubled (40m) must not
+  assert.equal(decideNudge({ ...base, st: { ...newState(now - 30 * 60_000), nudgesSent: 1 } }), null)
+  assert.ok(decideNudge({ ...base, st: { ...newState(now - 41 * 60_000), nudgesSent: 1 } }))
+})
+
+test('goal-active skip only when enabled', () => {
+  const now = 1_000_000_000
+  const entry = { id: 'x', enabled: true, prompt: '', idleMinutes: 0 }
+  const st = newState(now - 30 * 60_000)
+  const base = { now, entry, st, agentLive: true, agentStatus: 'idle', goalActive: true }
+  assert.ok(decideNudge({ ...base, eff: { ...DEFAULTS } }), 'default: goal ignored (v1.0 behaviour)')
+  const r = evaluateChat({ ...base, eff: { ...DEFAULTS, skipWhenGoalActive: true } })
+  assert.equal(r.action, 'wait'); assert.equal(r.reason, 'goal-active')
+})
+
+test('onlyAfterError waits for an error, then fires once', () => {
+  const now = 1_000_000_000
+  const entry = { id: 'x', enabled: true, prompt: '', idleMinutes: 0 }
+  const eff = { ...DEFAULTS, onlyAfterError: true }
+  const st = newState(now - 30 * 60_000)
+  const base = { now, entry, eff, agentLive: true, agentStatus: 'idle' }
+  assert.equal(evaluateChat({ ...base, st }).reason, 'waiting-for-error')
+  assert.equal(evaluateChat({ ...base, st: { ...st, errorAt: now - 1000 } }).action, 'nudge')
+})
+
+test('quiet hours: same-day, midnight wrap, disabled, bad input', () => {
+  const at = (h, m) => new Date(2026, 0, 15, h, m).getTime()   // local time
+  const q = { enabled: true, start: '22:00', end: '07:00', timezone: '' }
+  assert.equal(inQuietHours(at(23, 0), q), true)
+  assert.equal(inQuietHours(at(3, 0), q), true)
+  assert.equal(inQuietHours(at(7, 0), q), false)
+  assert.equal(inQuietHours(at(12, 0), q), false)
+  const day = { enabled: true, start: '09:00', end: '17:00', timezone: '' }
+  assert.equal(inQuietHours(at(10, 0), day), true)
+  assert.equal(inQuietHours(at(18, 0), day), false)
+  assert.equal(inQuietHours(at(23, 0), { ...q, enabled: false }), false)
+  assert.equal(inQuietHours(at(23, 0), { ...q, start: '08:00', end: '08:00' }), false)
+  assert.equal(inQuietHours(at(23, 0), { enabled: true, start: 'zz', end: '07:00' }), false)
+  const n = normalizeQuietHours({ enabled: true, start: '9:5', end: '25:00', timezone: 'Not/AZone' })
+  assert.deepEqual(n, { enabled: true, start: '22:00', end: '07:00', timezone: '' })
+  assert.equal(normalizeQuietHours({ timezone: 'Europe/Berlin' }).timezone, 'Europe/Berlin')
+  // an explicit zone is honoured: 12:00 UTC is 21:00 in Tokyo
+  const utcNoon = Date.UTC(2026, 0, 15, 12, 0)
+  assert.equal(inQuietHours(utcNoon, { enabled: true, start: '20:00', end: '23:00', timezone: 'Asia/Tokyo' }), true)
+  assert.equal(inQuietHours(utcNoon, { enabled: true, start: '20:00', end: '23:00', timezone: 'UTC' }), false)
+  // quiet hours defer a due nudge
+  const entry = { id: 'x', enabled: true, prompt: '', idleMinutes: 0 }
+  const now = at(23, 0)
+  const r = evaluateChat({ now, entry, st: newState(now - 60 * 60_000), eff: { ...DEFAULTS, quietHours: q }, agentLive: true, agentStatus: 'idle' })
+  assert.equal(r.reason, 'quiet-hours')
+})
+
+test('sanitize accepts the v1.1 keys with bounds', () => {
+  const p = sanitizeSettingsPatch({ skipWhenGoalActive: true, onlyAfterError: true, backoffFactor: 99, backoffMaxMinutes: -3, quietHours: { enabled: true, start: '23:30', end: '06:15', timezone: 'UTC' } })
+  assert.equal(p.skipWhenGoalActive, true)
+  assert.equal(p.onlyAfterError, true)
+  assert.equal(p.backoffFactor, 10)
+  assert.equal(p.backoffMaxMinutes, 0)
+  assert.deepEqual(p.quietHours, { enabled: true, start: '23:30', end: '06:15', timezone: 'UTC' })
+  assert.equal(sanitizeSettingsPatch({ backoffFactor: 1.5 }).backoffFactor, 1.5)
+})
+
 // ── boot smoke: fake ctx + real handler ──────────────────────────────────
 console.log('# apply() smoke over fake ctx')
 
@@ -181,7 +265,7 @@ const fakeSessionQuery = {
     : { sessionId: id, status: 'fulfilled', value: { session: { id } } })),
 }
 // The real cordis Fiber THROWS on any ctx.<service> property read outside
-// `inject` — mimic that exactly. A permissive plain-object ctx once let the
+// `inject`, mimic that exactly. A permissive plain-object ctx once let the
 // ctx.sessions catalog bug ship to production.
 const strictCtx = (base) => new Proxy(base, {
   get(t, k) {
@@ -285,7 +369,7 @@ const call = async (req, res) => { await handler(req, res); return res }
   assert.equal(JSON.parse(byTitle.body).via, 'title')
   console.log('  ok - secret set -> bad 401, good prompt accepted via title ref (label + real title)')
 }
-// rate limiting: default 30/min — flood past it
+// rate limiting: default 30/min, flood past it
 {
   let last
   for (let i = 0; i < 40; i++) last = await call(fakeReq('POST', '/dsh-idle-watchdog/api/prompt', { headers: { 'x-idle-watchdog-secret': 'a-proper-long-secret-1' }, body: { chat: 'session-watchme', message: 'x' } }), fakeRes())
@@ -296,7 +380,7 @@ const call = async (req, res) => { await handler(req, res); return res }
 // unknown chat 404, junk body 400, missing route 404
 {
   const r1 = await call(fakeReq('POST', '/dsh-idle-watchdog/api/prompt', { headers: { 'x-idle-watchdog-secret': 'a-proper-long-secret-1' }, body: { chat: 'session-does-not-exist-at-all', message: 'x' } }), fakeRes())
-  assert.ok(r1.statusCode === 404 || r1.statusCode === 429, 'unknown (or rate-limited) — got ' + r1.statusCode)
+  assert.ok(r1.statusCode === 404 || r1.statusCode === 429, 'unknown (or rate-limited), got ' + r1.statusCode)
   const r2 = await call(fakeReq('GET', '/dsh-idle-watchdog/api/nope'), fakeRes())
   assert.equal(r2.statusCode, 404)
   console.log('  ok - unknown chat and unknown route 404')
@@ -320,7 +404,7 @@ const { writeFileSync, readFileSync, mkdirSync, existsSync } = await import('nod
 mkdirSync(join(process.env.DSH_HOME, 'idle-watchdog'), { recursive: true })
 // Point the defensive schemastery loader at the running install's copy when
 // present (before `pnpm install` the plugin has no node_modules of its own),
-// so the primary settings-scope path — not just the fallback — is exercised.
+// so the primary settings-scope path, not just the fallback, is exercised.
 for (const guess of [
   join(dirname(process.execPath), '..', 'lib', 'node_modules', '@deepseek-ai', 'dsh', 'node_modules', '@deepseek-ai', 'schemastery', 'lib', 'index.cjs'),
   join(process.env.HOME || '', '.nvm', 'versions', 'node', process.version, 'lib', 'node_modules', '@deepseek-ai', 'dsh', 'node_modules', '@deepseek-ai', 'schemastery', 'lib', 'index.cjs'),
@@ -380,6 +464,14 @@ await sleep(300) // async init: loadStates + armTimers (tick every 5 s)
   const chat = body.perChat.find((c) => c.sessionId === 'session-nudge')
   assert.ok(chat && chat.live === true && chat.running === false)
   assert.equal(chat.nudgesSent, 0)
+  const nres = fakeRes()
+  await handler2(fakeReq('GET', '/dsh-idle-watchdog/api/next'), nres)
+  const next = JSON.parse(nres.body)
+  const row = next.rows.find((r) => r.sessionId === 'session-nudge')
+  assert.ok(row && ['waiting', 'due'].includes(row.reason), 'preview explains the watched chat')
+  assert.ok(Number.isFinite(row.dueAt) && row.maxNudges >= 1)
+  assert.equal(next.quietNow, false)
+  assert.ok(body.preview && body.preview.rows.length >= 1, 'status carries the preview')
   console.log(`  ok - ${scopeEngaged ? 'settings-scope store active' : 'fallback store (schemastery absent)'}; seeded state visible`)
 }
 // let the tick fire: idle 70 s > 60 s window on a live idle agent => nudge
@@ -393,6 +485,7 @@ assert.equal(followups2[0].source.plugin, 'dsh-idle-watchdog')
   await handler2(fakeReq('GET', '/dsh-idle-watchdog/api/status'), res)
   const chat = JSON.parse(res.body).perChat.find((c) => c.sessionId === 'session-nudge')
   assert.equal(chat.nudgesSent, 1)
+  assert.equal(chat.lastOutcome && chat.lastOutcome.kind, 'nudged', 'last outcome recorded')
   assert.ok(Date.now() - chat.lastActivityAt < 2000)            // nudge re-armed the window
   console.log('  ok - idle tick delivered personalised followup, counter incremented')
 }

@@ -1,4 +1,4 @@
-# DSH-Idle-Watchdog — design
+# DSH-Idle-Watchdog design
 
 DeepSeek Harness web-profile plugin: watches chats, auto-prompts the ones that
 go idle, and exposes a small secret-protected HTTP API that lets external
@@ -13,10 +13,10 @@ Built against a single DSH host, 2026-09-11.
 |---|---|---|
 | Enumerate every chat (live **and** persisted-cold) | `sessionQuery.listSessions(): SessionRecord[]`, `readTitleSnapshots(ids)` | `@deepseek-ai/dsh-session-query` |
 | Live agents + status | `ctx.agents.list() / .get(id)`, `agent.status: 'idle' \| 'running'` | `agents` service (`dsh-agent-loop`) |
-| Post into a chat | `agent.followup(UserMessage)` — queues a user-role message and opens a turn when idle | same |
-| Wake a cold chat for an API prompt | `ctx.sessionController.resolveAgent(sessionId) → {agent} \| {error}` — the browser's own lazy-resume path | `@deepseek-ai/dsh-api-session-controller` |
+| Post into a chat | `agent.followup(UserMessage)`, queues a user-role message and opens a turn when idle | same |
+| Wake a cold chat for an API prompt | `ctx.sessionController.resolveAgent(sessionId) → {agent} \| {error}`, the browser's own lazy-resume path | `@deepseek-ai/dsh-api-session-controller` |
 | Folded notices (not fake user turns) | `session.append('user/message', {source:{kind:'plugin', form:'notice', summary}})` | `session/event` plane; precedent: `@weibaohui/dsh-continue` |
-| Activity signal per chat | `ctx.on('session/event', (session, event) …)` — post-commit append feed | core |
+| Activity signal per chat | `ctx.on('session/event', (session, event) …)`, post-commit append feed | core |
 | Settings persistence + live edits | `ctx.settings.register(ns, schemasterySchema, {applies:'live'}) → {get, update}` | `@deepseek-ai/dsh-settings` |
 | HTTP surface | `ctx.webServer.register({kind:'prefix', path, handler(req,res)})` | `@deepseek-ai/dsh-host-webserver` |
 | Settings-page UI | client slot `settings.section` + locale registry | `slots`/`locale` client services; precedent: `dsh-continue` client |
@@ -43,7 +43,7 @@ for machine callers, and mutating UI endpoints get a CSRF guard
   `idleMinutes`, post the configured prompt via `followup`, up to
   `maxNudges` per idle period; the counter resets when a *human* message
   arrives (`source.kind === 'user'`). Cadence: next nudge is measured from the
-  last append — which includes the watchdog's own prompt — so no extra
+  last append, which includes the watchdog's own prompt, so no extra
   cooldown knob is needed.
 * **Settings UI** (Settings page section): master switch, global window /
   cap / default prompt, per-chat table (enable, custom prompt, custom
@@ -77,18 +77,21 @@ then `settings.api.secret`, else fail-closed. So a secret can stay off disk.
 
 * "Idle" is only ever computed for **live** agents (`ctx.agents.get(sid)`),
   because only they can receive `followup` without waking state. A watched
-  chat that is not live is skipped and marked `notLive` — never nudged, never
+  chat that is not live is skipped and marked `notLive`, never nudged, never
   error-logged.
 * Every committed `session/event` append for a watched chat stamps
   `lastActivityAt = now` (model output, tool results, plugin prompts alike).
 * A human `user/message` (`source.kind === 'user'`) additionally resets
-  `nudgesSent` to 0 — a fresh idle period begins.
+  `nudgesSent` to 0, a fresh idle period begins.
 * A chat only nudges while its agent reports `status === 'idle'`; a `running`
   agent is working, not idle.
 * On plugin boot, chats with no state start with `lastActivityAt = boot`
-  (grace window — no boot storm).
+  (grace window, no boot storm).
 * Reaching `maxNudges` posts one folded notice ("watchdog paused until you
-  reply") — never a fake user turn.
+  reply"), never a fake user turn.
+
+* **v1.1 decision order** (`evaluateChat`, pure, shared by the scan and `/next`): master switch, chat enabled, agent live, agent idle, cap, goal active (`goals.get(agent)` phase `active` and activation `armed`, only when `skipWhenGoalActive`), error seen (live bus `agent/error`, only when `onlyAfterError`), window elapsed (`window * backoffFactor^nudgesSent`, optionally capped), quiet hours. With default settings this reduces to the 1.0 rules.
+* The `goals` service and the `agent/error` bus event are read optionally; a host without them leaves those options inert instead of failing boot.
 
 ## 5. HTTP surface
 
@@ -101,10 +104,11 @@ then `settings.api.secret`, else fail-closed. So a secret can stay off disk.
 | `POST /dsh-idle-watchdog/api/secret` | `X-Requested-With` + JSON | set/clear API secret |
 | `POST /dsh-idle-watchdog/api/prompt` | **secret** | external chat prompt (the API) |
 | `GET /dsh-idle-watchdog/api/logs` | none | activity tail |
+| `GET /dsh-idle-watchdog/api/next` | none | read-only preview: per watched chat, would it nudge, when, or why not |
 
 Route owns the full response; every reply is `application/json`, `no-store`.
 Unknown sub-paths 404. No CORS headers are ever sent, so cross-origin JSON
-POSTs fail preflight in browsers — same-origin UI + server-side callers only.
+POSTs fail preflight in browsers, same-origin UI + server-side callers only.
 
 ## 6. Failure posture
 
@@ -124,7 +128,7 @@ POSTs fail preflight in browsers — same-origin UI + server-side callers only.
 
 ```
 lib/index.js   host half (watchdog engine + routes + settings)
-lib/client.js  browser half — hand-written __ModuleLoader__ bundle, no build step
+lib/client.js  browser half, hand-written __ModuleLoader__ bundle, no build step
                (precedent: dsh-voice, dsh-model-picker-augmented)
 test/run.mjs   pure-helper unit tests + fake-ctx boot/route smoke tests
 ```

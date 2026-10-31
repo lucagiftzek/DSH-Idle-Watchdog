@@ -4,7 +4,7 @@
  * Executes lib/client.js the way the dsh browser loader does (fake
  * window.__ModuleLoader__ + require('react')), applies it against fake
  * slots/locale services, then MOUNTS the settings-section component in a
- * jsdom DOM with real react-dom — so effects run: initial fetches resolve
+ * jsdom DOM with real react-dom, so effects run: initial fetches resolve
  * through the API helpers, the full loaded layout renders, and the token
  * stylesheet lands in <head>. A component that throws in the browser throws
  * here first.
@@ -26,15 +26,20 @@ globalThis.document = dom.window.document
 globalThis.location = dom.window.location
 
 const statusPayload = {
-  armed: true, row: 'idle-watchdog', version: '1.0.0', bootedAt: Date.now(),
+  armed: true, row: 'idle-watchdog', version: '1.1.0', bootedAt: Date.now(),
   settingsStore: 'settings', envSecretPresent: false,
   settings: {
     enabled: true, idleMinutes: 20, maxNudges: 3, tickSeconds: 30,
     defaultPrompt: 'anything to continue?', notifyOnCap: true, wakeColdForApi: true,
+    skipWhenGoalActive: false, onlyAfterError: false, backoffFactor: 1, backoffMaxMinutes: 0,
+    quietHours: { enabled: false, start: '22:00', end: '07:00', timezone: '' },
     api: { rateLimitPerMinute: 30, secret: '***', secretFingerprint: 'ab12cd34' },
     chats: [{ id: 'session-demo-chat', label: 'Demo', enabled: true, prompt: '', idleMinutes: 0 }],
   },
   perChat: [{ sessionId: 'session-demo-chat', live: true, running: false, lastActivityAt: Date.now() - 90_000, nudgesSent: 1, lastNudgeAt: null }],
+  preview: { now: Date.now(), quietNow: true, enabled: true, rows: [
+    { sessionId: 'session-demo-chat', label: 'Demo', watched: true, live: true, running: false, action: 'wait', reason: 'waiting', dueAt: Date.now() + 600_000, windowMinutes: 20, nudgesSent: 1, maxNudges: 3, lastOutcome: { kind: 'nudged', at: Date.now() - 60_000 } },
+  ] },
   activityTail: [{ at: new Date().toISOString(), event: 'armed', row: 'idle-watchdog', pid: 1 }],
 }
 const fetchCalls = []
@@ -95,6 +100,8 @@ assert.ok(slots.registered[0].label().includes('Idle Watchdog'))
   assert.ok(html.includes('External API'), 'API card rendered')
   assert.ok(html.includes('/dsh-idle-watchdog/api/prompt'), 'curl example shows the real route')
   assert.ok(html.includes('anything to continue?'), 'default prompt bound from the API')
+  assert.ok(html.includes('Next nudge') && html.includes('nudged'), 'status table shows next nudge and last outcome')
+  assert.ok(html.includes('Quiet hours'), 'behaviour card rendered')
   assert.ok(html.includes('ab12cd34'), 'secret fingerprint shown, value not')
   assert.ok(document.getElementById('dsh-idle-watchdog-styles'), 'stylesheet element in <head>')
   assert.ok(fetchCalls.includes('/dsh-idle-watchdog/api/status'), 'status polled')
@@ -114,6 +121,8 @@ assert.ok(slots.registered[0].label().includes('Idle Watchdog'))
   assert.equal(settingsCall.init.headers['x-requested-with'], 'dsh-idle-watchdog', 'CSRF header sent by the UI')
   const sentBody = JSON.parse(settingsCall.init.body)
   assert.equal(sentBody.chats[0].id, 'session-demo-chat', 'chat table round-trips')
+  assert.equal(sentBody.backoffFactor, 1, 'new keys round-trip')
+  assert.equal(sentBody.quietHours.enabled, false)
   assert.equal(sentBody.api.secret, undefined, 'save never sends a secret')
 
   await act(async () => { root.unmount() })
