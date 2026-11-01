@@ -1,9 +1,12 @@
 # DSH-Idle-Watchdog
 
+[![npm](https://img.shields.io/npm/v/dsh-idle-watchdog?label=npm)](https://www.npmjs.com/package/dsh-idle-watchdog)
+
 Nudges chats that fall silent and posts prompts into any chat through a small authenticated HTTP API.
 
 ```bash
-dsh plugin --profile web add github:lucagiftzek/DSH-Idle-Watchdog
+dsh plugin --profile web add dsh-idle-watchdog
+# or from GitHub: dsh plugin --profile web add github:lucagiftzek/DSH-Idle-Watchdog
 # restart dsh web, then opt chats in under Settings, Idle Watchdog
 ```
 
@@ -26,8 +29,11 @@ POST /dsh-idle-watchdog/api/prompt
 
 ## Install (DSH web profile)
 
+Install from npm: `dsh plugin --profile web add dsh-idle-watchdog`, or from GitHub: `dsh plugin --profile web add github:lucagiftzek/DSH-Idle-Watchdog`.
+
 ```bash
-dsh plugin --profile web add github:lucagiftzek/DSH-Idle-Watchdog
+dsh plugin --profile web add dsh-idle-watchdog
+# or from GitHub: dsh plugin --profile web add github:lucagiftzek/DSH-Idle-Watchdog
 # then restart dsh-web: the host half is mounted at boot only
 ```
 
