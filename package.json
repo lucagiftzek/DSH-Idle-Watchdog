@@ -1,6 +1,6 @@
 {
   "name": "dsh-idle-watchdog",
-  "version": "1.1.0",
+  "version": "1.2.0",
   "description": "DeepSeek Harness (DSH) plugin: nudge opted-in chats when they go idle (quiet hours, backoff, goal-aware, error-only mode, preview), plus a secret-protected HTTP API to prompt any chat from scripts, cron or webhooks.",
   "type": "module",
   "main": "lib/index.js",
@@ -13,13 +13,14 @@
     "lib",
     "cordis.patch.yml",
     "docs",
+    "skills",
     "README.md",
     "CHANGELOG.md",
     "LICENSE"
   ],
   "scripts": {
-    "check": "node --check lib/index.js && node --check lib/client.js",
-    "test": "node test/run.mjs && node test/client.mjs"
+    "check": "node --check lib/index.js && node --check lib/doctor.js && node --check lib/client.js && node --check lib/dual-settings.js && node --check lib/errors.js && node --check lib/plugin-errors.js && node --check lib/plugin-skills.js",
+    "test": "node test/run.mjs && node test/client.mjs && node test/dual.mjs && node test/errors.mjs && node test/doctor.mjs"
   },
   "engines": {
     "node": ">=22.5"

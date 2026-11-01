@@ -17,7 +17,14 @@ POST /dsh-idle-watchdog/api/prompt
 
 ## Install (DSH web profile)
 
-The package is linked, not copied. Keep the checkout where it lives.
+```bash
+dsh plugin --profile web add github:lucagiftzek/DSH-Idle-Watchdog
+# then restart dsh-web: the host half is mounted at boot only
+```
+
+The package declares `dsh.bundle`, so `dsh plugin add` lists `dsh-idle-watchdog` in `dsh.profile.bundles`.
+
+Or from a local checkout (linked, not copied: keep the checkout where it lives):
 
 ```bash
 git clone https://github.com/lucagiftzek/DSH-Idle-Watchdog ~/plugins/DSH-Idle-Watchdog
@@ -31,13 +38,21 @@ pnpm install
 # 2. restart dsh-web: the host half is mounted at boot only
 ```
 
-The official installer also works: `dsh plugin --profile web add link:/absolute/path/to/DSH-Idle-Watchdog`.
+The official installer also works with a checkout: `dsh plugin --profile web add link:/absolute/path/to/DSH-Idle-Watchdog`.
 
 After the restart, reload the web UI. The **Idle Watchdog** section appears in Settings. The browser half hot-reloads; only the server half needs the restart. Requires Node 22.5 or newer and a DSH build with the `agents`, `settings` and `webServer` services.
 
 ## Configuration
 
-Everything is in **Settings, Idle Watchdog**, and persists in the `dsh-idle-watchdog` namespace of `~/.dsh/settings.yaml` (hand-editable, applies live). If the settings service is unavailable, the plugin falls back to `~/.dsh/idle-watchdog/settings.json`; `/status` reports which store is active.
+Everything is in **Settings, Idle Watchdog**, and applies live. Where it is stored depends on the DSH line:
+
+* **DSH 0.1.5 and older:** the `dsh-idle-watchdog` namespace of `~/.dsh/settings.yaml` (hand-editable).
+* **DSH 0.1.7 / 0.2.x and newer:** the plugin row `idle-watchdog` in the profile patch, `~/.dsh/profiles/web/cordis.patch.yml` (`- id: idle-watchdog` / `config:`). On the first boot after an upgrade the old `dsh-idle-watchdog` section is imported once from `settings.yaml.imported`, never over a row that already has values.
+* **No settings service:** `~/.dsh/idle-watchdog/settings.json`.
+
+`/status` reports which store is active (`settingsStore`: `settings`, `profile-row` or `fallback-file`).
+
+**API secret file.** The prompt API secret has a version-independent home: `~/.dsh/idle-watchdog/api-secret` (mode 0600; override the path with `DSH_IDLE_WATCHDOG_SECRET_FILE`). Precedence: env `DSH_IDLE_WATCHDOG_SECRET`, then the file, then the stored `api.secret` setting. Saving a secret in Settings writes the file; on 0.2.x the secret never goes into the profile patch, and the upgrade import moves an old `api.secret` into the file. Scripts read it with `IW_SECRET=${DSH_IDLE_WATCHDOG_SECRET:-$(cat ~/.dsh/idle-watchdog/api-secret)}`.
 
 | Setting | Meaning | Default |
 |---|---|---|
@@ -104,6 +119,7 @@ Auth, one of: `x-idle-watchdog-secret: <secret>` or `Authorization: Bearer <secr
 
 ```bash
 # set the secret once in Settings (or export DSH_IDLE_WATCHDOG_SECRET for dsh-web), then:
+IW_SECRET=${DSH_IDLE_WATCHDOG_SECRET:-$(cat ~/.dsh/idle-watchdog/api-secret)}
 curl -sS -X POST http://127.0.0.1:3080/dsh-idle-watchdog/api/prompt \
   -H 'content-type: application/json' \
   -H "x-idle-watchdog-secret: $IW_SECRET" \
@@ -141,6 +157,17 @@ Other read-only routes: `GET /api/health`, `/api/status`, `/api/next`, `/api/log
 * The secret is compared in constant time (sha256 then `timingSafeEqual`) and is never logged or returned. `GET /status` masks it.
 * A browser cross-site JSON POST cannot work: the custom header forces a CORS preflight and no CORS headers are ever sent. UI-mutating routes also require `X-Requested-With: dsh-idle-watchdog` and a JSON content type. Bodies are capped at 64 KiB.
 * Anything that can post to a chat can steer an agent that has tools. Treat the secret like shell access to that agent.
+
+## When something goes wrong
+
+* Ask your agent to load the **`idle-watchdog-doctor`** skill. It ships in `skills/idle-watchdog-doctor/` and the plugin registers it with the skills service at start (offered after `dsh web` restarts). If your DSH does not list it, install it by hand:
+  ```bash
+  P=$(node -p "require('path').dirname(require.resolve('dsh-idle-watchdog/package.json',{paths:[(process.env.DSH_HOME||require('os').homedir()+'/.dsh')+'/profiles/web']}))")
+  mkdir -p "${DSH_HOME:-$HOME/.dsh}/skills" && cp -r "$P/skills/idle-watchdog-doctor" "${DSH_HOME:-$HOME/.dsh}/skills/"
+  ```
+  The skills folder is watched, so it appears without a restart. Details: [docs/TROUBLESHOOTING.md](docs/TROUBLESHOOTING.md#start-here).
+* One-call self-check: `GET /dsh-idle-watchdog/api/doctor` (read-only, same access as `/status`). It reports the settings mode, whether `Config` is visible to the loader, whether an API secret is configured (yes or no, plus its source: env, file or settings; never the value), the secret file mode (0600), the watched chats, `sessionController`, the next-nudge preview, the age of the last scan and whether the state file is writable. The read-only routes `/health`, `/status`, `/next` and `/logs` stay available (no secrets in the output).
+* Every HTTP error carries a stable `code` (prefix `WATCHDOG_`) next to the short `error` string scripts already parse: [docs/ERRORS.md](docs/ERRORS.md).
 
 ## Troubleshooting
 

@@ -1,5 +1,18 @@
 # Changelog
 
+## 1.2.0 (2026-11-01)
+
+Runs on DSH 0.1.5 and on DSH 0.2.x (0.1.7 and later) with the same code:
+
+* Settings: DSH 0.1.5 keeps the registered namespace `dsh-idle-watchdog` in `settings.yaml`. DSH 0.2.x has no registrable namespaces; the plugin now exports its settings schema as `Config` (every field live, no remount) and stores values in its profile row `idle-watchdog` in `cordis.patch.yml`. On the first 0.2.x boot it imports the old `dsh-idle-watchdog` section once from `settings.yaml.imported` (the core import cannot, because the section name is not the entry id), and never over a row that already has values.
+* API secret: new version-independent home `$DSH_HOME/idle-watchdog/api-secret` (mode 0600, override with `DSH_IDLE_WATCHDOG_SECRET_FILE`). Precedence: env `DSH_IDLE_WATCHDOG_SECRET`, then the file, then the stored setting. `POST /secret` writes the file (and, on 0.1.5 only, the namespace copy as before); on 0.2.x the secret is never written into the profile patch, and the legacy import moves it into the file. Scripts should read the file instead of grepping `settings.yaml`, which no longer exists on 0.2.x.
+* `/status` reports `secretSource` (env, file, settings or none, never the value), `secretFile` and `settingsEntry`; `settingsStore` can now also be `profile-row`.
+* Schemastery is resolved from the running harness first, so live fields are wrapped the way the 0.2.x Loader commits them.
+* New `GET /dsh-idle-watchdog/api/doctor`: read-only self-check (settings mode, `Config` visible, API secret configured and its source, secret file mode, watched chats, `sessionController`, next-nudge preview, last scan age, state file writable). It never shows a secret value or a path.
+* The packaged skill `idle-watchdog-doctor` is registered with the skills service at start.
+* A missing `settings.json` on a fresh install is logged as an info line (`init: no fallback settings.json yet ...`) instead of `WATCHDOG_INIT_FAILED`; other init failures keep the code.
+* The module now also has a default export `{ name, inject, apply, Config }` (the named exports are unchanged), so the 0.2.x loader finds `Config` there.
+
 ## 1.1.0
 
 New, all optional, all defaulting to the 1.0 behaviour:

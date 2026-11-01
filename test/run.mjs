@@ -119,6 +119,7 @@ test('isHumanUserMessage only counts human turns', () => {
   assert.ok(isHumanUserMessage({ type: 'user/message', data: { source: { kind: 'user' } } }))
   assert.ok(isHumanUserMessage({ type: 'user/message', data: {} }))            // legacy/no source
   assert.ok(!isHumanUserMessage({ type: 'user/message', data: { source: { kind: 'plugin', plugin: 'dsh-idle-watchdog' } } }))
+  assert.ok(!isHumanUserMessage({ type: 'user/message', data: { source: { kind: 'plugin:dsh-idle-watchdog' } } }))
   assert.ok(!isHumanUserMessage({ type: 'turn/end', data: { source: { kind: 'user' } } }))
 })
 
@@ -386,7 +387,7 @@ const call = async (req, res) => { await handler(req, res); return res }
   assert.equal(accepted.via, 'title')
   assert.equal(followups.length, 1)
   assert.equal(followups[0].content[0].text, 'external ping')
-  assert.equal(followups[0].source.kind, 'plugin')
+  assert.equal(followups[0].source.kind, 'plugin:dsh-idle-watchdog')
   assert.ok(followups[0].id.length > 10)
   // the REAL session title (from readTitleSnapshots, not the settings label) resolves too
   const byTitle = await call(fakeReq('POST', '/dsh-idle-watchdog/api/prompt', { headers: { 'x-idle-watchdog-secret': 'a-proper-long-secret-1' }, body: { chat: 'alpha demo', message: 'by title' } }), fakeRes())
@@ -503,8 +504,7 @@ await sleep(300) // async init: loadStates + armTimers (tick every 5 s)
 await sleep(5600)
 assert.equal(followups2.length, 1, 'exactly one nudge delivered')
 assert.equal(followups2[0].content[0].text, 'personal nudge')   // per-chat prompt wins
-assert.equal(followups2[0].source.kind, 'plugin')
-assert.equal(followups2[0].source.plugin, 'dsh-idle-watchdog')
+assert.equal(followups2[0].source.kind, 'plugin:dsh-idle-watchdog')
 {
   const res = fakeRes()
   await handler2(fakeReq('GET', '/dsh-idle-watchdog/api/status'), res)
